@@ -2,7 +2,9 @@ package com.example.slabiak.appointmentscheduler.controllerrest;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,161 +30,193 @@ import com.example.slabiak.appointmentscheduler.service.WorkService;
 @RequestMapping("/rest/appointments")
 public class AppointmentRestController {
 
-    private static final String REJECTION_CONFIRMATION_VIEW = "appointments/rejectionConfirmation";
+	private static final String REJECTION_CONFIRMATION_VIEW = "appointments/rejectionConfirmation";
 
-    private final WorkService workService;
-    private final UserService userService;
-    private final AppointmentService appointmentService;
-    private final ExchangeService exchangeService;
+	private final WorkService workService;
+	private final UserService userService;
+	private final AppointmentService appointmentService;
+	private final ExchangeService exchangeService;
 
-    public AppointmentRestController(WorkService workService, UserService userService, AppointmentService appointmentService, ExchangeService exchangeService) {
-        this.workService = workService;
-        this.userService = userService;
-        this.appointmentService = appointmentService;
-        this.exchangeService = exchangeService;
-    }
+	public AppointmentRestController(WorkService workService, UserService userService,
+			AppointmentService appointmentService, ExchangeService exchangeService) {
+		this.workService = workService;
+		this.userService = userService;
+		this.appointmentService = appointmentService;
+		this.exchangeService = exchangeService;
+	}
 
-    @GetMapping("/all")
-    public ResponseEntity<?> showAllAppointments( @AuthenticationPrincipal CustomUserDetails currentUser) {
+	@GetMapping("/all")
+	public ResponseEntity<?> showAllAppointments(@AuthenticationPrincipal CustomUserDetails currentUser) {
 
-        if (currentUser.hasRole("ROLE_CUSTOMER")) {
-            List<Appointment> appointmentByCustomerId = appointmentService.getAppointmentByCustomerId(currentUser.getId());
-            return new ResponseEntity<>(appointmentByCustomerId, HttpStatus.ACCEPTED);
-        } else if (currentUser.hasRole("ROLE_PROVIDER")) {
-           List<Appointment> appointmentByProviderId = appointmentService.getAppointmentByProviderId(currentUser.getId());
-           return new ResponseEntity<>(appointmentByProviderId, HttpStatus.ACCEPTED);
-        } else if (currentUser.hasRole("ROLE_ADMIN")) {
-            List<Appointment> allAppointments = appointmentService.getAllAppointments();
-            return new ResponseEntity<>(allAppointments, HttpStatus.ACCEPTED);
-        }else {
-        	return new ResponseEntity<>(null, HttpStatus.ACCEPTED);
+		if (currentUser.hasRole("ROLE_CUSTOMER")) {
+			List<Appointment> appointmentByCustomerId = appointmentService
+					.getAppointmentByCustomerId(currentUser.getId());
+			return new ResponseEntity<>(appointmentByCustomerId, HttpStatus.ACCEPTED);
+		} else if (currentUser.hasRole("ROLE_PROVIDER")) {
+			List<Appointment> appointmentByProviderId = appointmentService
+					.getAppointmentByProviderId(currentUser.getId());
+			return new ResponseEntity<>(appointmentByProviderId, HttpStatus.ACCEPTED);
+		} else if (currentUser.hasRole("ROLE_ADMIN")) {
+			List<Appointment> allAppointments = appointmentService.getAllAppointments();
+			return new ResponseEntity<>(allAppointments, HttpStatus.ACCEPTED);
+		} else {
+			return new ResponseEntity<>(null, HttpStatus.ACCEPTED);
+		}
+	}
+
+	@GetMapping("/{id}")
+	public ResponseEntity<?> showAppointmentDetail(@PathVariable("id") int appointmentId,
+			@AuthenticationPrincipal CustomUserDetails currentUser) {
+		Appointment appointment = appointmentService.getAppointmentByIdWithAuthorization(appointmentId);
+		ChatMessage ch=new ChatMessage();
+		boolean allowedToRequestRejection = appointmentService.isCustomerAllowedToRejectAppointment(currentUser.getId(),
+				appointmentId);
+		boolean allowedToAcceptRejection = appointmentService.isProviderAllowedToAcceptRejection(currentUser.getId(),
+				appointmentId);
+		boolean allowedToExchange = exchangeService.checkIfEligibleForExchange(currentUser.getId(), appointmentId);
+		String cancelNotAllowedReason = appointmentService.getCancelNotAllowedReason(currentUser.getId(),
+				appointmentId);
+
+		if (appointment == null) {
+			return new ResponseEntity<>("Appointment not found", HttpStatus.NOT_FOUND);
+		}
+
+		Map<String, Object> response = new HashMap<>();
+		response.put("appointment", appointment);
+		response.put("chatMessage", ch);
+		response.put("allowedToRequestRejection", allowedToRequestRejection);
+		response.put("allowedToAcceptRejection", allowedToAcceptRejection);
+		response.put("allowedToExchange", allowedToExchange);
+		response.put("allowedToCancel", cancelNotAllowedReason == null);
+		response.put("cancelNotAllowedReason", cancelNotAllowedReason);
+
+		if (allowedToRequestRejection) {
+			response.put("remainingTime",
+					formatDuration(Duration.between(LocalDateTime.now(), appointment.getEnd().plusDays(1))));
+		}
+
+		return new ResponseEntity<>(response, HttpStatus.OK);
+	}
+
+	@PostMapping("/reject")
+	 public ResponseEntity<String> processAppointmentRejectionRequestByToken(@RequestParam("token") String token) {
+        boolean result = appointmentService.requestAppointmentRejection(token);
+
+        if (result) {
+            return new ResponseEntity<>("Rejection request processed successfully", HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>("Failed to process rejection request", HttpStatus.BAD_REQUEST);
         }
     }
-    
 
-//    @GetMapping("/{id}")
-//    public String showAppointmentDetail(@PathVariable("id") int appointmentId, Model model, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        Appointment appointment = appointmentService.getAppointmentByIdWithAuthorization(appointmentId);
-//        model.addAttribute("appointment", appointment);
-//        model.addAttribute("chatMessage", new ChatMessage());
-//        boolean allowedToRequestRejection = appointmentService.isCustomerAllowedToRejectAppointment(currentUser.getId(), appointmentId);
-//        boolean allowedToAcceptRejection = appointmentService.isProviderAllowedToAcceptRejection(currentUser.getId(), appointmentId);
-//        boolean allowedToExchange = exchangeService.checkIfEligibleForExchange(currentUser.getId(), appointmentId);
-//        model.addAttribute("allowedToRequestRejection", allowedToRequestRejection);
-//        model.addAttribute("allowedToAcceptRejection", allowedToAcceptRejection);
-//        model.addAttribute("allowedToExchange", allowedToExchange);
-//        if (allowedToRequestRejection) {
-//            model.addAttribute("remainingTime", formatDuration(Duration.between(LocalDateTime.now(), appointment.getEnd().plusDays(1))));
-//        }
-//        String cancelNotAllowedReason = appointmentService.getCancelNotAllowedReason(currentUser.getId(), appointmentId);
-//        model.addAttribute("allowedToCancel", cancelNotAllowedReason == null);
-//        model.addAttribute("cancelNotAllowedReason", cancelNotAllowedReason);
-//        return "appointments/appointmentDetail";
-//    }
-//
-//
-//    @PostMapping("/reject")
-//    public String processAppointmentRejectionRequest(@RequestParam("appointmentId") int appointmentId, @AuthenticationPrincipal CustomUserDetails currentUser, Model model) {
-//        boolean result = appointmentService.requestAppointmentRejection(appointmentId, currentUser.getId());
-//        model.addAttribute(result);
-//        model.addAttribute("type", "request");
-//        return REJECTION_CONFIRMATION_VIEW;
-//    }
-//
-//    @GetMapping("/reject")
-//    public String processAppointmentRejectionRequest(@RequestParam("token") String token, Model model) {
-//        boolean result = appointmentService.requestAppointmentRejection(token);
-//        model.addAttribute(result);
-//        model.addAttribute("type", "request");
-//        return REJECTION_CONFIRMATION_VIEW;
-//    }
-//
-//    @PostMapping("/acceptRejection")
-//    public String acceptAppointmentRejectionRequest(@RequestParam("appointmentId") int appointmentId, @AuthenticationPrincipal CustomUserDetails currentUser, Model model) {
-//        boolean result = appointmentService.acceptRejection(appointmentId, currentUser.getId());
-//        model.addAttribute(result);
-//        model.addAttribute("type", "accept");
-//        return REJECTION_CONFIRMATION_VIEW;
-//    }
-//
-//    @GetMapping("/acceptRejection")
-//    public String acceptAppointmentRejectionRequest(@RequestParam("token") String token, Model model) {
-//        boolean result = appointmentService.acceptRejection(token);
-//        model.addAttribute(result);
-//        model.addAttribute("type", "accept");
-//        return REJECTION_CONFIRMATION_VIEW;
-//    }
-//
-//    @PostMapping("/messages/new")
-//    public String addNewChatMessage(@ModelAttribute("chatMessage") ChatMessage chatMessage, @RequestParam("appointmentId") int appointmentId, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        int authorId = currentUser.getId();
-//        appointmentService.addMessageToAppointmentChat(appointmentId, authorId, chatMessage);
-//        return "redirect:/appointments/" + appointmentId;
-//    }
-//
-//    @GetMapping("/new")
-//    public String selectProvider(Model model, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        if (currentUser.hasRole("ROLE_CUSTOMER_RETAIL")) {
-//            model.addAttribute("providers", userService.getProvidersWithRetailWorks());
-//        } else if (currentUser.hasRole("ROLE_CUSTOMER_CORPORATE")) {
-//            model.addAttribute("providers", userService.getProvidersWithCorporateWorks());
-//        }
-//        return "appointments/selectProvider";
-//    }
-//
-//    @GetMapping("/new/{providerId}")
-//    public String selectService(@PathVariable("providerId") int providerId, Model model, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        if (currentUser.hasRole("ROLE_CUSTOMER_RETAIL")) {
-//            model.addAttribute("works", workService.getWorksForRetailCustomerByProviderId(providerId));
-//        } else if (currentUser.hasRole("ROLE_CUSTOMER_CORPORATE")) {
-//            model.addAttribute("works", workService.getWorksForCorporateCustomerByProviderId(providerId));
-//        }
-//        model.addAttribute(providerId);
-//        return "appointments/selectService";
-//    }
-//
-//    @GetMapping("/new/{providerId}/{workId}")
-//    public String selectDate(@PathVariable("workId") int workId, @PathVariable("providerId") int providerId, Model model, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        if (workService.isWorkForCustomer(workId, currentUser.getId())) {
-//            model.addAttribute(providerId);
-//            model.addAttribute("workId", workId);
-//            return "appointments/selectDate";
-//        } else {
-//            return "redirect:/appointments/new";
-//        }
-//
-//    }
-//
-//    @GetMapping("/new/{providerId}/{workId}/{dateTime}")
-//    public String showNewAppointmentSummary(@PathVariable("workId") int workId, @PathVariable("providerId") int providerId, @PathVariable("dateTime") String start, Model model, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        if (appointmentService.isAvailable(workId, providerId, currentUser.getId(), LocalDateTime.parse(start))) {
-//            model.addAttribute("work", workService.getWorkById(workId));
-//            model.addAttribute("provider", userService.getProviderById(providerId).getFirstName() + " " + userService.getProviderById(providerId).getLastName());
-//            model.addAttribute(providerId);
-//            model.addAttribute("start", LocalDateTime.parse(start));
-//            model.addAttribute("end", LocalDateTime.parse(start).plusMinutes(workService.getWorkById(workId).getDuration()));
-//            return "appointments/newAppointmentSummary";
-//        } else {
-//            return "redirect:/appointments/new";
-//        }
-//    }
-//
-//    @PostMapping("/new")
-//    public String bookAppointment(@RequestParam("workId") int workId, @RequestParam("providerId") int providerId, @RequestParam("start") String start, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        appointmentService.createNewAppointment(workId, providerId, currentUser.getId(), LocalDateTime.parse(start));
-//        return "redirect:/appointments/all";
-//    }
-//
-//    @PostMapping("/cancel")
-//    public String cancelAppointment(@RequestParam("appointmentId") int appointmentId, @AuthenticationPrincipal CustomUserDetails currentUser) {
-//        appointmentService.cancelUserAppointmentById(appointmentId, currentUser.getId());
-//        return "redirect:/appointments/all";
-//    }
+	@GetMapping("/rejectById")
+	  public ResponseEntity<String> processAppointmentRejectionRequestById(@RequestParam("token") String token) {
+        boolean result = appointmentService.requestAppointmentRejection(token);
 
-
-    public static String formatDuration(Duration duration) {
-        long s = duration.getSeconds();
-        return String.format("%dh%02dm", s / 3600, (s % 3600) / 60);
+        if (result) {
+            return new ResponseEntity<>("Rejection request processed successfully", HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>("Failed to process rejection request", HttpStatus.BAD_REQUEST);
+        }
     }
+
+	@PostMapping("/acceptRejection")
+	public ResponseEntity<String> acceptAppointmentRejectionRequest(@RequestParam("appointmentId") int appointmentId,
+			@AuthenticationPrincipal CustomUserDetails currentUser) {
+		boolean result = appointmentService.acceptRejection(appointmentId, currentUser.getId());
+		if (result) {
+			return new ResponseEntity<>("Rejection request accepted successfully", HttpStatus.OK);
+		} else {
+			return new ResponseEntity<>("Failed to accept rejection request", HttpStatus.BAD_REQUEST);
+		}
+	}
+
+	@GetMapping("/acceptRejection")
+	public ResponseEntity<String> acceptAppointmentRejectionRequest(@RequestParam("token") String token) {
+		boolean result = appointmentService.acceptRejection(token);
+		if (result) {
+			return new ResponseEntity<>("Rejection request accepted successfully", HttpStatus.OK);
+		} else {
+			return new ResponseEntity<>("Failed to accept rejection request", HttpStatus.BAD_REQUEST);
+		}
+	}
+
+	@PostMapping("/messages/new")
+	public ResponseEntity<String> addNewChatMessage(@ModelAttribute("chatMessage") ChatMessage chatMessage,
+			@RequestParam("appointmentId") int appointmentId, @AuthenticationPrincipal CustomUserDetails currentUser) {
+		int authorId = currentUser.getId();
+		appointmentService.addMessageToAppointmentChat(appointmentId, authorId, chatMessage);
+		return new ResponseEntity<>("Chat message added successfully", HttpStatus.OK);
+	}
+
+	@GetMapping("/new")
+	public ResponseEntity<?> selectProvider(@AuthenticationPrincipal CustomUserDetails currentUser) {
+		Map<String, Object> response = new HashMap<>();
+		if (currentUser.hasRole("ROLE_CUSTOMER_RETAIL")) {
+			response.put("providers", userService.getProvidersWithRetailWorks());
+		} else if (currentUser.hasRole("ROLE_CUSTOMER_CORPORATE")) {
+			response.put("providers", userService.getProvidersWithCorporateWorks());
+		}
+		return new ResponseEntity<>(response, HttpStatus.OK);
+	}
+
+	@GetMapping("/new/{providerId}")
+	public ResponseEntity<?> selectService(@PathVariable("providerId") int providerId,
+			@AuthenticationPrincipal CustomUserDetails currentUser) {
+		Map<String, Object> response = new HashMap<>();
+		if (currentUser.hasRole("ROLE_CUSTOMER_RETAIL")) {
+			response.put("works", workService.getWorksForRetailCustomerByProviderId(providerId));
+		} else if (currentUser.hasRole("ROLE_CUSTOMER_CORPORATE")) {
+			response.put("works", workService.getWorksForCorporateCustomerByProviderId(providerId));
+		}
+		return new ResponseEntity<>(response, HttpStatus.OK);
+	}
+
+	@GetMapping("/new/{providerId}/{workId}")
+	public ResponseEntity<String> selectDate(@PathVariable("workId") int workId,
+			@PathVariable("providerId") int providerId, @AuthenticationPrincipal CustomUserDetails currentUser) {
+		if (workService.isWorkForCustomer(workId, currentUser.getId())) {
+			return new ResponseEntity<>("Please select a date", HttpStatus.OK);
+		} else {
+			return new ResponseEntity<>("Unauthorized", HttpStatus.UNAUTHORIZED);
+		}
+	}
+
+	@GetMapping("/new/{providerId}/{workId}/{dateTime}")
+	public ResponseEntity<?> showNewAppointmentSummary(@PathVariable("workId") int workId,
+			@PathVariable("providerId") int providerId, @PathVariable("dateTime") String start,
+			@AuthenticationPrincipal CustomUserDetails currentUser) {
+		Map<String, Object> response = new HashMap<>();
+		if (appointmentService.isAvailable(workId, providerId, currentUser.getId(), LocalDateTime.parse(start))) {
+			response.put("work", workService.getWorkById(workId));
+			response.put("provider", userService.getProviderById(providerId).getFirstName() + " "
+					+ userService.getProviderById(providerId).getLastName());
+			response.put("start", LocalDateTime.parse(start));
+			response.put("end", LocalDateTime.parse(start).plusMinutes(workService.getWorkById(workId).getDuration()));
+			return new ResponseEntity<>(response, HttpStatus.OK);
+		} else {
+			return new ResponseEntity<>("Unauthorized", HttpStatus.UNAUTHORIZED);
+		}
+	}
+
+	@PostMapping("/new")
+	public ResponseEntity<String> bookAppointment(@RequestParam("workId") int workId,
+	        @RequestParam("providerId") int providerId, @RequestParam("start") String start,
+	        @AuthenticationPrincipal CustomUserDetails currentUser) {
+	    appointmentService.createNewAppointment(workId, providerId, currentUser.getId(), LocalDateTime.parse(start));
+	    return ResponseEntity.status(HttpStatus.CREATED).body("Appointment booked successfully");
+	}
+	@PostMapping("/cancel")
+	public String cancelAppointment(@RequestParam("appointmentId") int appointmentId,
+			@AuthenticationPrincipal CustomUserDetails currentUser) {
+		appointmentService.cancelUserAppointmentById(appointmentId, currentUser.getId());
+		return "redirect:/appointments/all";
+	}
+
+
+	public static String formatDuration(Duration duration) {
+		long s = duration.getSeconds();
+		return String.format("%dh%02dm", s / 3600, (s % 3600) / 60);
+	}
 
 }
